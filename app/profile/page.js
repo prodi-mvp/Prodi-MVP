@@ -21,9 +21,17 @@ export default function ProfilePage() {
   });
 
   const handleConnect = async () => {
-    const { userAddress } = await connectWallet();
-    setWalletAddress(userAddress);
-  };
+  if (typeof window === "undefined") return; // защита от серверного рендера
+  try {
+    const result = await connectWallet();
+    if (result && result.userAddress) {
+      setWalletAddress(result.userAddress);
+    }
+  } catch (err) {
+    console.error("Ошибка подключения MetaMask:", err);
+    alert("MetaMask не найден. Открой сайт через браузер MetaMask или установи расширение.");
+  }
+};
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -52,27 +60,40 @@ export default function ProfilePage() {
   }, [walletAddress]);
 
   // ✅ Отправляем профиль в Supabase
-  const handleSubmit = async (e) => {
-    e.preventDefault();
 
-    if (!walletAddress) {
-      alert("Сначала подключите MetaMask.");
+const handleSubmit = async (e) => {
+  e.preventDefault();
+
+  if (!walletAddress) {
+    alert("Сначала подключите MetaMask.");
+    return;
+  }
+
+  try {
+    const payload = {
+      wallet: walletAddress.toLowerCase().trim(),
+      ...form,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .upsert(payload);
+
+    if (error) {
+      console.error("🧨 Supabase error details:", JSON.stringify(error, null, 2));
+      alert("Ошибка при сохранении: " + error.message);
       return;
     }
 
-    const { error } = await supabase
-      .from("profiles")
-      .upsert([{ wallet: walletAddress.toLowerCase(), ...form }]);
-
-    if (error) {
-  alert("❌ Ошибка при сохранении в Supabase!");
-  console.error("🧨 Supabase error details:", JSON.stringify(error, null, 2));
-  return;
-}
-
+    console.log("✅ Профиль успешно сохранён:", data);
     alert("✅ Профиль сохранён!");
     window.location.href = `/company/${walletAddress.toLowerCase()}`;
-  };
+  } catch (err) {
+    console.error("🔥 JS ошибка:", err);
+    alert("Ошибка JS: " + err.message);
+  }
+};
 
   return (
     <main className="min-h-screen bg-white px-6 py-12">

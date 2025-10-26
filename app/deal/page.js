@@ -9,13 +9,17 @@ export default function DealPage() {
   const [error, setError] = useState(null);
 
   const handleConnect = async () => {
-    try {
-      const { userAddress } = await connectWallet();
-      setWalletAddress(userAddress);
-    } catch (err) {
-      setError(err.message);
+  if (typeof window === "undefined") return;
+  try {
+    const result = await connectWallet();
+    if (result && result.userAddress) {
+      setWalletAddress(result.userAddress);
     }
-  };
+  } catch (err) {
+    console.error("Ошибка подключения MetaMask:", err);
+    setError(err.message);
+  }
+};
 
 const [selectedPartner, setSelectedPartner] = useState(null);
   return (

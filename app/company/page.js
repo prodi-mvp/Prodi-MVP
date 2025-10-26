@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { connectWallet } from "../../../lib/wallet";
+import { connectWallet } from "@/lib/wallet";
 import ProfileSearch from "../../components/ProfileSearch";
 
 
@@ -47,7 +47,7 @@ export default function CompanyProfile() {
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Навигация */}
         <div className="flex justify-between items-center">
-          <a href="/" className="text-xl font-bold text-black hover:underline">🔷 Prodi</a>
+          <Link href="/" className="text-xl font-bold text-black hover:underline">🔷 Prodi</Link>
           {isOwner && (
             <a
               href="/profile"

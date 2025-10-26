@@ -3,8 +3,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { connectWallet } from "../../../lib/wallet";
 import Link from "next/link";
+import { connectWallet } from "../../../lib/wallet";
 import { supabase } from "../../../lib/supabase";
 import SupabaseProfileSearch from "../../../components/SupabaseProfileSearch";
 
@@ -33,7 +33,7 @@ export default function CompanyProfile() {
         const { userAddress } = await connectWallet();
         setCurrentWallet(userAddress?.toLowerCase());
       } catch (err) {
-        console.warn("Не удалось подключить кошелёк");
+        console.warn("Не удалось подключить кошелёк:", err);
       }
     };
 
@@ -55,14 +55,16 @@ export default function CompanyProfile() {
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Навигация */}
         <div className="flex justify-between items-center">
-          <a href="/" className="text-xl font-bold text-black hover:underline">🔷 Prodi</a>
+          <Link href="/" className="text-xl font-bold text-black hover:underline">
+            🔷 Prodi
+          </Link>
           {isOwner && (
-            <a
+            <Link
               href="/profile"
               className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
             >
               ✏️ Редактировать
-            </a>
+            </Link>
           )}
         </div>
 
@@ -74,12 +76,23 @@ export default function CompanyProfile() {
           {/* Левая колонка */}
           <div className="space-y-4">
             {profile.logo && (
-              <img src={profile.logo} alt="Логотип" className="w-full h-auto object-contain rounded" />
+              <img
+                src={profile.logo}
+                alt="Логотип"
+                className="w-full h-auto object-contain rounded"
+              />
             )}
             {profile.media && (
               <div>
                 <p className="font-semibold">📺 Медиа:</p>
-                <a href={profile.media} className="text-blue-600 underline" target="_blank">{profile.media}</a>
+                <a
+                  href={profile.media}
+                  className="text-blue-600 underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {profile.media}
+                </a>
               </div>
             )}
           </div>
@@ -91,11 +104,33 @@ export default function CompanyProfile() {
             <p><strong>Регион:</strong> {profile.region}</p>
             <p><strong>Маркетплейсы:</strong> {profile.marketplaces}</p>
             <p><strong>Контакт:</strong> {profile.contact}</p>
-            <p><strong>Email:</strong> <a href={`mailto:${profile.email}`} className="text-blue-600 underline">{profile.email}</a></p>
-            <p><strong>Сайт:</strong> <a href={profile.website} className="text-blue-600 underline" target="_blank">{profile.website}</a></p>
+            <p>
+              <strong>Email:</strong>{" "}
+              <a
+                href={`mailto:${profile.email}`}
+                className="text-blue-600 underline"
+              >
+                {profile.email}
+              </a>
+            </p>
+            <p>
+              <strong>Сайт:</strong>{" "}
+              <a
+                href={profile.website}
+                className="text-blue-600 underline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {profile.website}
+              </a>
+            </p>
             <p><strong>Описание:</strong> {profile.pitch}</p>
-            <p className="text-sm text-gray-500">Приватность: {profile.privacy}</p>
-            <p className="text-sm text-gray-400">Адрес кошелька: {wallet}</p>
+            <p className="text-sm text-gray-500">
+              Приватность: {profile.privacy}
+            </p>
+            <p className="text-sm text-gray-400">
+              Адрес кошелька: {wallet}
+            </p>
           </div>
         </div>
       </div>
