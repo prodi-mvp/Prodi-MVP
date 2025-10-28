@@ -114,7 +114,7 @@ const handleSubmit = async (e) => {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <label className="block font-semibold">Название компании</label>
+          <label className="block font-semibold">Company name</label>
           <input name="company" value={form.company} onChange={handleChange} className="w-full border p-2 rounded" required />
 
           <label className="block font-semibold">Тип компании</label>
