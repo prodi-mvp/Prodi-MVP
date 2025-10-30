@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { connectWallet as connectWalletImported } from "../../lib/wallet"; // может отсутствовать
 import { supabase, setProdiWalletHeader } from "../../lib/supabaseClient";
 import { connectPhantom, recordDealMemo, ensureAirdrop } from "../../lib/solanaClient";
 
@@ -20,6 +19,7 @@ async function fetchCompanyByWallet(wallet) {
   }
   return data;
 }
+
 function useDebounced(value, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -29,22 +29,15 @@ function useDebounced(value, delay = 300) {
   return v;
 }
 
-/** Безопасный коннект EVM (MetaMask) */
+/** Безопасный коннект EVM (MetaMask) без внешних хелперов */
 async function safeConnectEvmWallet() {
-  try {
-    if (typeof connectWalletImported === "function") {
-      const r = await connectWalletImported();
-      if (r?.userAddress) return { userAddress: String(r.userAddress) };
-    }
-  } catch (e) {
-    console.warn("External connectWallet error, trying fallback:", e);
+  if (typeof window === "undefined" || !window.ethereum) {
+    throw new Error("No EVM wallet found. Install MetaMask.");
   }
-  if (typeof window !== "undefined" && window.ethereum) {
-    const accs = await window.ethereum.request({ method: "eth_requestAccounts" });
-    const addr = Array.isArray(accs) && accs[0] ? String(accs[0]) : null;
-    return addr ? { userAddress: addr } : null;
-  }
-  throw new Error("No EVM wallet found. Install MetaMask.");
+  const accs = await window.ethereum.request({ method: "eth_requestAccounts" });
+  const addr = Array.isArray(accs) && accs[0] ? String(accs[0]) : null;
+  if (!addr) throw new Error("No EVM account returned");
+  return { userAddress: addr };
 }
 
 /* ===== inner page ===== */
@@ -86,7 +79,6 @@ function DealPageInner() {
           const addr = String(res.userAddress);
           setWalletAddress(addr);
           setProdiWalletHeader?.(addr);
-
           const found = await fetchCompanyByWallet(addr);
           if (found?.company) {
             setACompany(found.company);
@@ -101,7 +93,7 @@ function DealPageInner() {
     })();
   }, []);
 
-  // Если Phantom уже авторизован — подтянем
+  // Если Phantom уже доверен — подтянем
   useEffect(() => {
     const prov = typeof window !== "undefined" ? window.solana : null;
     if (prov?.isPhantom) {
@@ -204,7 +196,7 @@ function DealPageInner() {
       return setError("You can’t create a deal with yourself. Choose another company.");
     }
 
-    // Собираем "условия" для хеша (только смысловые поля формы)
+    // условия для хеша
     const terms = {
       marketplaces: String(f.get("marketplaces") || ""),
       is_exclusive_mp: !!f.get("is_exclusive_mp"),
@@ -229,7 +221,7 @@ function DealPageInner() {
       const newDealId = data.id;
       setOkId(newDealId);
 
-      // 2) Пишем memo в Solana devnet (если Phantom подключен)
+      // 2) Memo в Solana devnet (если Phantom подключен)
       if (!solanaAddr) {
         setSolanaErr("Phantom not connected — on-chain memo skipped.");
       } else {
@@ -242,12 +234,11 @@ function DealPageInner() {
             terms,
           });
           setSolanaTx(signature);
-
-          // 3) Сохраняем подпись транзакции в сделку (если колонка есть)
+          // 3) Сохраняем сигнатуру в deals.blockchain_tx (если колонка есть)
           try {
             await supabase.from("deals").update({ blockchain_tx: signature }).eq("id", newDealId);
           } catch (e) {
-            console.warn("Deal update with blockchain_tx failed (column missing?):", e?.message);
+            console.warn("Deal update with blockchain_tx failed:", e?.message);
           }
         } catch (chainErr) {
           console.error("Solana memo failed:", chainErr);
@@ -273,7 +264,7 @@ function DealPageInner() {
         </div>
       )}
 
-      {/* SEARCH — always visible */}
+      {/* SEARCH */}
       <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
         <label className="block text-sm font-medium mb-2">Find a company to make a deal with</label>
         <input
@@ -312,7 +303,9 @@ function DealPageInner() {
 
       {/* Parties */}
       <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
-        <div className="font-semibold mb-2">{headerTitle}</div>
+        <div className="font-semibold mb-2">
+          {headerTitle}
+        </div>
         <div className="text-sm">
           <div className="mb-1">
             Party A (initiator): <b>{aCompany || (walletAddress ? walletAddress : "—")}</b>
@@ -390,7 +383,7 @@ function DealPageInner() {
           disabled={!solanaAddr}
           onClick={async () => {
             try {
-              const info = await ensureAirdrop(solanaAddr, 0.1); // целим 0.1 SOL минимум
+              const info = await ensureAirdrop(solanaAddr, 0.1);
               setAirdropInfo(info);
               setSolanaErr(null);
             } catch (e) {
@@ -476,14 +469,17 @@ function DealPageInner() {
         </button>
       </form>
 
-{/* DEBUG (видно только в prod) */}
-{typeof window !== "undefined" && (
-  <div style={{ marginTop: "1rem", fontSize: "11px", color: "#888", textAlign: "left" }}>
-    <div>ethereum: {String(!!window.ethereum)}</div>
-    <div>phantom: {String(!!window.solana && window.solana.isPhantom)}</div>
-    <div>phantom pubkey: {String(window.solana?.publicKey?.toBase58?.() || "-")}</div>
-  </div>
-)}
+      {/* DEBUG (видно только в браузере) */}
+      {typeof window !== "undefined" && (
+        <div className="mt-4 text-[11px] text-left text-gray-500">
+          <div>ethereum: {String(!!window.ethereum)}</div>
+          <div>phantom: {String(!!window.solana && window.solana.isPhantom)}</div>
+          <div>phantom pubkey: {String(window.solana?.publicKey?.toBase58?.() || "-")}</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DealPage() {
   return (
@@ -492,3 +488,4 @@ export default function DealPage() {
     </Suspense>
   );
 }
+
