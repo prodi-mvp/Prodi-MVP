@@ -171,16 +171,17 @@ function DealPageInner() {
       return setError("You cannot create a deal with yourself. Choose another company.");
     }
 
-    const payload = {
-      initiator_wallet: walletAddress,
-      partner_wallet: partnerWallet,
-      marketplaces: String(f.get("marketplaces") || ""),
-      regions: String(f.get("regions") || ""),
-      is_exclusive_mp: !!f.get("is_exclusive_mp"),
-      is_exclusive_reg: !!f.get("is_exclusive_reg"),
-      rrc_control: String(f.get("rrc_control") || ""),
-      guarantees: String(f.get("guarantees") || "")
-    };
+const payload = {
+  initiator_wallet: walletAddress,
+  partner_wallet: partnerWallet,
+  marketplaces: String(f.get("marketplaces") || ""),
+  regions: String(f.get("regions") || ""),
+  is_exclusive_mp: !!f.get("is_exclusive_mp"),
+  is_exclusive_reg: !!f.get("is_exclusive_reg"),
+  rrc_control: String(f.get("rrc_control") || ""),
+  guarantees: String(f.get("guarantees") || ""),
++ status: "proposed"
+     };
 
     try {
       setSaving(true);
