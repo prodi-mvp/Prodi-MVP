@@ -1,26 +1,99 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import ProfileSearchDeal from "../../components/ProfileSearchDeal";
 import { connectWallet } from "../../lib/wallet";
 import { supabase } from "../../lib/supabaseClient";
 
+async function fetchCompanyByWallet(wallet) {
+  if (!wallet) return null;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("company, wallet")
+    .eq("wallet", String(wallet))
+    .maybeSingle();
+  if (error) {
+    console.error("fetchCompanyByWallet:", error);
+    return null;
+  }
+  return data;
+}
+
 export default function DealPage() {
-  const [walletAddress, setWalletAddress] = useState(null);         // Party A
-  const [selectedPartner, setSelectedPartner] = useState(null);     // Party B (from search)
+  // Party A (initiator)
+  const [walletAddress, setWalletAddress] = useState(null);
+  const [aCompany, setACompany] = useState(null);
+
+  // Party B (counterparty)
+  const [selectedPartner, setSelectedPartner] = useState(null);
+  const [bCompany, setBCompany] = useState(null);
+
   const [error, setError] = useState(null);
   const [okId, setOkId] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const handleConnect = async () => {
-    try {
-      const result = await connectWallet();
-      if (result?.userAddress) setWalletAddress(result.userAddress);
-    } catch (e) {
-      console.error("wallet connect error:", e);
-      setError((e && e.message) || "Failed to connect wallet");
-    }
-  };
+  const searchParams = useSearchParams();
+  const prefCounterparty = searchParams.get("counterparty");
+  const prefCompany = searchParams.get("company");
+
+  // 1) Connect wallet and load Party A company name (if exists)
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await connectWallet();
+        if (result?.userAddress) {
+          const addr = String(result.userAddress);
+          setWalletAddress(addr);
+          const found = await fetchCompanyByWallet(addr);
+          if (found?.company) setACompany(found.company);
+        }
+      } catch (e) {
+        // ignore: user can still fill the form after connecting later
+      }
+    })();
+  }, []);
+
+  // 2) Apply deep-link counterparty (?counterparty=&company=)
+  useEffect(() => {
+    (async () => {
+      if (!prefCounterparty) return;
+      const preset = { wallet: String(prefCounterparty), company: prefCompany || null };
+      setSelectedPartner(preset);
+      if (!preset.company) {
+        const found = await fetchCompanyByWallet(preset.wallet);
+        setBCompany(found?.company || null);
+      } else {
+        setBCompany(preset.company);
+      }
+    })();
+  }, [prefCounterparty, prefCompany]);
+
+  // 3) If user selects partner via search, show its company
+  useEffect(() => {
+    (async () => {
+      if (!selectedPartner) return;
+      const w = selectedPartner.wallet || selectedPartner.wallet_address || selectedPartner.address;
+      const c = selectedPartner.company || null;
+      setBCompany(c);
+      if (!c && w) {
+        const found = await fetchCompanyByWallet(String(w));
+        setBCompany(found?.company || null);
+      }
+    })();
+  }, [selectedPartner]);
+
+  const headerTitle = useMemo(() => {
+    const a = aCompany || (walletAddress ? "Your company" : "—");
+    const b =
+      bCompany ||
+      (selectedPartner?.company
+        ? selectedPartner.company
+        : selectedPartner?.wallet
+        ? selectedPartner.wallet.slice(0, 10) + "…"
+        : "—");
+    return `Deal: ${a} ↔ ${b}`;
+  }, [aCompany, bCompany, walletAddress, selectedPartner]);
 
   const handleSubmit = async (ev) => {
     ev.preventDefault();
@@ -29,12 +102,12 @@ export default function DealPage() {
 
     const f = new FormData(ev.currentTarget);
 
-    // нормализуем кошелёк контрагента: из профиля или из резервного поля
+    // partner wallet: from selected profile OR manual field
     const partnerWallet =
       (selectedPartner &&
         (selectedPartner.wallet ||
-         selectedPartner.wallet_address ||
-         selectedPartner.address)) ||
+          selectedPartner.wallet_address ||
+          selectedPartner.address)) ||
       String(f.get("manual_partner_wallet") || "").trim();
 
     if (!walletAddress) return setError("Connect your wallet first.");
@@ -52,7 +125,6 @@ export default function DealPage() {
 
       rrc_control: String(f.get("rrc_control") || ""),
       guarantees: String(f.get("guarantees") || "")
-      // при необходимости позже добавим: status, duration_days, visibility и т.п.
     };
 
     try {
@@ -70,10 +142,8 @@ export default function DealPage() {
 
       setOkId(data.id);
       ev.target.reset();
-      // оставляем выбранного партнёра, чтобы было видно, с кем создали
     } catch (e) {
-      console.error("create deal error:", e);
-      setError((e && e.message) || "Failed to create deal");
+      setError(e?.message || "Failed to create deal");
     } finally {
       setSaving(false);
     }
@@ -81,51 +151,58 @@ export default function DealPage() {
 
   return (
     <div className="flex flex-col items-center justify-start min-h-screen bg-gray-100 text-center p-4">
-      {/* Поиск партнёра */}
+      {/* Search partner */}
       <ProfileSearchDeal onSelect={(p) => setSelectedPartner(p)} />
 
-      {/* Панель участников — всегда видно двух сторон */}
+      {/* Participants */}
       <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
-        <div className="font-semibold mb-2">Participants</div>
+        <div className="font-semibold mb-2">{headerTitle}</div>
         <div className="text-sm">
           <div className="mb-1">
-            Party A (initiator): <b>{walletAddress || "— not connected —"}</b>
+            Party A (initiator): <b>{aCompany || (walletAddress ? walletAddress : "—")}</b>
           </div>
           <div>
-            Party B (counterparty):
-            <div className="mt-1">
-              <div className="font-medium">
-                {(selectedPartner && (selectedPartner.company || selectedPartner.email)) || "— not selected —"}
-              </div>
-              <div className="text-xs text-gray-600">
-                Wallet: {(selectedPartner && (selectedPartner.wallet || selectedPartner.wallet_address || selectedPartner.address)) || "—"}
-              </div>
+            Party B (counterparty):{" "}
+            <b>
+              {bCompany ||
+                selectedPartner?.company ||
+                (selectedPartner?.wallet ? selectedPartner.wallet : "—")}
+            </b>
+            <div className="text-xs text-gray-600">
+              Wallet:{" "}
+              {(selectedPartner &&
+                (selectedPartner.wallet ||
+                  selectedPartner.wallet_address ||
+                  selectedPartner.address)) || "—"}
             </div>
           </div>
         </div>
       </div>
 
-      <h1 className="text-2xl font-bold mb-4">Create Deal</h1>
+      <h1 className="text-2xl font-bold mb-2">Create Deal</h1>
 
-      {/* Кошелёк инициатора */}
       {walletAddress ? (
-        <p className="text-green-700 text-sm mb-2">
-          ✅ Wallet connected: {walletAddress}
-        </p>
+        <p className="text-green-700 text-sm mb-2">✅ Wallet connected: {walletAddress}</p>
       ) : (
         <button
-          onClick={handleConnect}
+          onClick={async () => {
+            try {
+              const r = await connectWallet();
+              if (r?.userAddress) setWalletAddress(String(r.userAddress));
+              const found = await fetchCompanyByWallet(String(r?.userAddress || ""));
+              if (found?.company) setACompany(found.company);
+            } catch {}
+          }}
           className="mb-2 bg-black text-white px-6 py-2 rounded-lg hover:bg-gray-800"
         >
           🔐 Connect MetaMask
         </button>
       )}
 
-      {/* Сообщения */}
       {error && <p className="text-red-600 mt-1">{error}</p>}
       {okId && <p className="text-green-700 mt-1">✅ Deal saved. ID: <b>{okId}</b></p>}
 
-      {/* Форма сделки */}
+      {/* Deal form */}
       <form onSubmit={handleSubmit} className="w-full max-w-md mt-6 bg-white p-6 rounded-xl shadow-md text-left">
         <h2 className="text-xl font-semibold mb-4">Deal form</h2>
 
@@ -151,8 +228,7 @@ export default function DealPage() {
         <label className="block mb-2">Manufacturer guarantees:</label>
         <textarea name="guarantees" className="w-full p-2 border rounded mb-4" />
 
-        {/* TEMP for deploy/debug: ручной ввод кошелька партнёра, если в профиле его нет.
-            Когда профили будут полные, этот блок можно удалить без последствий. */}
+        {/* Manual fallback — можно удалить, когда у всех профилей будет wallet */}
         <div className="mb-4">
           <label className="block mb-2">Counterparty wallet (manual fallback):</label>
           <input
@@ -160,7 +236,7 @@ export default function DealPage() {
             className="w-full p-2 border rounded"
             placeholder="0x1111222233334444555566667777888899990000"
           />
-          <p className="text-xs text-gray-500 mt-1">Use only if search shows no wallet.</p>
+          <p className="text-xs text-gray-500 mt-1">Use only if the profile has no wallet.</p>
         </div>
 
         <button
