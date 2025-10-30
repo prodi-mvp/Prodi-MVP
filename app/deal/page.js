@@ -475,9 +475,15 @@ function DealPageInner() {
           {saving ? "Saving..." : "📩 Send deal terms"}
         </button>
       </form>
-    </div>
-  );
-}
+
+{/* DEBUG (видно только в prod) */}
+{typeof window !== "undefined" && (
+  <div style={{ marginTop: "1rem", fontSize: "11px", color: "#888", textAlign: "left" }}>
+    <div>ethereum: {String(!!window.ethereum)}</div>
+    <div>phantom: {String(!!window.solana && window.solana.isPhantom)}</div>
+    <div>phantom pubkey: {String(window.solana?.publicKey?.toBase58?.() || "-")}</div>
+  </div>
+)}
 
 export default function DealPage() {
   return (
