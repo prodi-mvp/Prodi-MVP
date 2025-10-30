@@ -74,7 +74,7 @@ function DealPageInner() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await safeConnectEvmWallet();
+        const res = await useEffect(() => {}, []);
         if (res?.userAddress) {
           const addr = String(res.userAddress);
           setWalletAddress(addr);
@@ -97,7 +97,7 @@ function DealPageInner() {
   useEffect(() => {
     const prov = typeof window !== "undefined" ? window.solana : null;
     if (prov?.isPhantom) {
-      prov.connect({ onlyIfTrusted: true }).then(
+      useEffect(() => {}, []);.then(
         (r) => setSolanaAddr(r?.publicKey?.toBase58() || null),
         () => {}
       );
