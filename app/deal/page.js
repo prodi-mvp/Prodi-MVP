@@ -19,7 +19,6 @@ async function fetchCompanyByWallet(wallet) {
   }
   return data;
 }
-
 function useDebounced(value, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -31,32 +30,26 @@ function useDebounced(value, delay = 300) {
 
 /* inner page */
 function DealPageInner() {
-  // A (initiator)
   const [walletAddress, setWalletAddress] = useState(null);
   const [aCompany, setACompany] = useState(null);
   const [hasOwnProfile, setHasOwnProfile] = useState(false);
 
-  // B (counterparty)
-  const [selectedPartner, setSelectedPartner] = useState(null); // {company?, wallet}
+  const [selectedPartner, setSelectedPartner] = useState(null);
   const [bCompany, setBCompany] = useState(null);
 
-  // UI
   const [error, setError] = useState(null);
   const [okId, setOkId] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // search
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 350);
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
 
-  // deeplink
   const searchParams = useSearchParams();
   const prefCounterparty = searchParams.get("counterparty");
   const prefCompany = searchParams.get("company");
 
-  // 1) connect + detect own profile
   useEffect(() => {
     (async () => {
       try {
@@ -78,7 +71,6 @@ function DealPageInner() {
     })();
   }, []);
 
-  // 2) apply deeplink (block self-deal)
   useEffect(() => {
     (async () => {
       if (!prefCounterparty) return;
@@ -100,7 +92,6 @@ function DealPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefCounterparty, prefCompany, walletAddress]);
 
-  // 3) ensure partner name
   useEffect(() => {
     (async () => {
       if (!selectedPartner) return;
@@ -114,13 +105,9 @@ function DealPageInner() {
     })();
   }, [selectedPartner]);
 
-  // 4) search public profiles (exclude self)
   useEffect(() => {
     (async () => {
-      if (!dq) {
-        setResults([]);
-        return;
-      }
+      if (!dq) { setResults([]); return; }
       setSearching(true);
       try {
         let qOr = `company.ilike.%${dq}%,email.ilike.%${dq}%`;
@@ -155,7 +142,6 @@ function DealPageInner() {
     return `Deal: ${a} ↔ ${b}`;
   }, [aCompany, bCompany, walletAddress, selectedPartner]);
 
-  // submit
   const handleSubmit = async (ev) => {
     ev.preventDefault();
     setError(null);
@@ -200,54 +186,50 @@ function DealPageInner() {
     }
   };
 
-  /* UI */
   return (
     <div className="flex flex-col items-center justify-start min-h-screen bg-gray-100 text-center p-4">
-      {/* если нет профиля — просим зарегистрироваться */}
       {!hasOwnProfile && (
         <div className="w-full max-w-md bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-xl mb-4 text-left">
-          You need a company profile to create deals. Please fill it out first on the Profile page.
+          Tip: create a company profile for a smoother flow. But you can already search and propose a deal.
         </div>
       )}
 
-      {/* строка поиска КОНТРАГЕНТА — показываем ТОЛЬКО если профиль уже есть */}
-      {hasOwnProfile && (
-        <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
-          <label className="block text-sm font-medium mb-2">Find a company to make a deal with</label>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="w-full p-2 border rounded"
-            placeholder="Type company or email…"
-          />
-          {searching && <p className="text-xs text-gray-500 mt-2">Searching…</p>}
-          {!!results.length && (
-            <ul className="mt-3 divide-y rounded border">
-              {results.map((r) => (
-                <li
-                  key={r.wallet}
-                  className="p-2 text-sm hover:bg-gray-50 cursor-pointer text-left"
-                  onClick={() => {
-                    setSelectedPartner({ wallet: r.wallet, company: r.company, email: r.email });
-                    setBCompany(r.company || null);
-                    setQ("");
-                    setResults([]);
-                    setError(null);
-                  }}
-                >
-                  <div className="font-medium">{r.company || "—"}</div>
-                  <div className="text-xs text-gray-600">
-                    {r.email || "—"} • wallet: {r.wallet?.slice(0, 10)}…
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          {!searching && dq && !results.length && (
-            <p className="text-xs text-gray-500 mt-2">No companies found.</p>
-          )}
-        </div>
-      )}
+      {/* SEARCH — always visible */}
+      <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
+        <label className="block text-sm font-medium mb-2">Find a company to make a deal with</label>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className="w-full p-2 border rounded"
+          placeholder="Type company or email…"
+        />
+        {searching && <p className="text-xs text-gray-500 mt-2">Searching…</p>}
+        {!!results.length && (
+          <ul className="mt-3 divide-y rounded border">
+            {results.map((r) => (
+              <li
+                key={r.wallet}
+                className="p-2 text-sm hover:bg-gray-50 cursor-pointer text-left"
+                onClick={() => {
+                  setSelectedPartner({ wallet: r.wallet, company: r.company, email: r.email });
+                  setBCompany(r.company || null);
+                  setQ("");
+                  setResults([]);
+                  setError(null);
+                }}
+              >
+                <div className="font-medium">{r.company || "—"}</div>
+                <div className="text-xs text-gray-600">
+                  {r.email || "—"} • wallet: {r.wallet?.slice(0, 10)}…
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!searching && dq && !results.length && (
+          <p className="text-xs text-gray-500 mt-2">No companies found.</p>
+        )}
+      </div>
 
       {/* Parties */}
       <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
@@ -304,7 +286,6 @@ function DealPageInner() {
       {error && <p className="text-red-600 mt-1">{error}</p>}
       {okId && <p className="text-green-700 mt-1">✅ Deal saved. ID: <b>{okId}</b></p>}
 
-      {/* Form */}
       <form onSubmit={handleSubmit} className="w-full max-w-md mt-6 bg-white p-6 rounded-xl shadow-md text-left">
         <h2 className="text-xl font-semibold mb-4">Deal form</h2>
 
@@ -330,7 +311,6 @@ function DealPageInner() {
         <label className="block mb-2">Manufacturer guarantees:</label>
         <textarea name="guarantees" className="w-full p-2 border rounded mb-4" />
 
-        {/* manual fallback */}
         <div className="mb-4">
           <label className="block mb-2">Counterparty wallet (manual fallback):</label>
           <input
@@ -353,7 +333,6 @@ function DealPageInner() {
   );
 }
 
-/* export with Suspense */
 export default function DealPage() {
   return (
     <Suspense fallback={<div className="p-6 text-center text-gray-600">Loading…</div>}>
