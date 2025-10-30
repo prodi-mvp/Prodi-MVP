@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ProfileSearchDeal from "../../components/ProfileSearchDeal";
 import { connectWallet } from "../../lib/wallet";
 import { supabase } from "../../lib/supabaseClient";
 
+/** ----- helpers ----- */
 async function fetchCompanyByWallet(wallet) {
   if (!wallet) return null;
   const { data, error } = await supabase
@@ -20,7 +21,10 @@ async function fetchCompanyByWallet(wallet) {
   return data;
 }
 
-export default function DealPage() {
+/** ==================== INNER ==================== */
+/** Внутренний компонент, который использует useSearchParams().
+ * Он обёрнут Suspense’ом снаружи, как того хочет Next. */
+function DealPageInner() {
   // Party A (initiator)
   const [walletAddress, setWalletAddress] = useState(null);
   const [aCompany, setACompany] = useState(null);
@@ -48,8 +52,8 @@ export default function DealPage() {
           const found = await fetchCompanyByWallet(addr);
           if (found?.company) setACompany(found.company);
         }
-      } catch (e) {
-        // ignore: user can still fill the form after connecting later
+      } catch {
+        /* user may connect later */
       }
     })();
   }, []);
@@ -116,13 +120,10 @@ export default function DealPage() {
     const payload = {
       initiator_wallet: walletAddress,
       partner_wallet: partnerWallet,
-
       marketplaces: String(f.get("marketplaces") || ""),
       regions: String(f.get("regions") || ""),
-
       is_exclusive_mp: !!f.get("is_exclusive_mp"),
       is_exclusive_reg: !!f.get("is_exclusive_reg"),
-
       rrc_control: String(f.get("rrc_control") || ""),
       guarantees: String(f.get("guarantees") || "")
     };
@@ -248,5 +249,14 @@ export default function DealPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+/** ==================== EXPORT (with Suspense) ==================== */
+export default function DealPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-center text-gray-600">Loading…</div>}>
+      <DealPageInner />
+    </Suspense>
   );
 }
