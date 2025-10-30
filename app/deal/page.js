@@ -2,10 +2,11 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { connectWallet } from "../../lib/wallet";
+import { connectWallet as connectWalletImported } from "../../lib/wallet"; // может отсутствовать
 import { supabase, setProdiWalletHeader } from "../../lib/supabaseClient";
+import { connectPhantom, recordDealMemo, ensureAirdrop } from "../../lib/solanaClient";
 
-/* helpers */
+/* ===== helpers ===== */
 async function fetchCompanyByWallet(wallet) {
   if (!wallet) return null;
   const { data, error } = await supabase
@@ -28,9 +29,27 @@ function useDebounced(value, delay = 300) {
   return v;
 }
 
-/* inner page */
+/** Безопасный коннект EVM (MetaMask) */
+async function safeConnectEvmWallet() {
+  try {
+    if (typeof connectWalletImported === "function") {
+      const r = await connectWalletImported();
+      if (r?.userAddress) return { userAddress: String(r.userAddress) };
+    }
+  } catch (e) {
+    console.warn("External connectWallet error, trying fallback:", e);
+  }
+  if (typeof window !== "undefined" && window.ethereum) {
+    const accs = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const addr = Array.isArray(accs) && accs[0] ? String(accs[0]) : null;
+    return addr ? { userAddress: addr } : null;
+  }
+  throw new Error("No EVM wallet found. Install MetaMask.");
+}
+
+/* ===== inner page ===== */
 function DealPageInner() {
-  const [walletAddress, setWalletAddress] = useState(null);
+  const [walletAddress, setWalletAddress] = useState(null); // EVM
   const [aCompany, setACompany] = useState(null);
   const [hasOwnProfile, setHasOwnProfile] = useState(false);
 
@@ -41,6 +60,14 @@ function DealPageInner() {
   const [okId, setOkId] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  // Solana
+  const [solanaAddr, setSolanaAddr] = useState(null);
+  const [solanaErr, setSolanaErr] = useState(null);
+  const [solanaTx, setSolanaTx] = useState(null);
+  const [solanaBusy, setSolanaBusy] = useState(false);
+  const [airdropInfo, setAirdropInfo] = useState(null);
+
+  // search
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 350);
   const [results, setResults] = useState([]);
@@ -50,10 +77,11 @@ function DealPageInner() {
   const prefCounterparty = searchParams.get("counterparty");
   const prefCompany = searchParams.get("company");
 
+  // Автопопытка EVM коннекта
   useEffect(() => {
     (async () => {
       try {
-        const res = await connectWallet();
+        const res = await safeConnectEvmWallet();
         if (res?.userAddress) {
           const addr = String(res.userAddress);
           setWalletAddress(addr);
@@ -67,8 +95,21 @@ function DealPageInner() {
             setHasOwnProfile(false);
           }
         }
-      } catch {}
+      } catch {
+        // тихо
+      }
     })();
+  }, []);
+
+  // Если Phantom уже авторизован — подтянем
+  useEffect(() => {
+    const prov = typeof window !== "undefined" ? window.solana : null;
+    if (prov?.isPhantom) {
+      prov.connect({ onlyIfTrusted: true }).then(
+        (r) => setSolanaAddr(r?.publicKey?.toBase58() || null),
+        () => {}
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -146,6 +187,8 @@ function DealPageInner() {
     ev.preventDefault();
     setError(null);
     setOkId(null);
+    setSolanaTx(null);
+    setSolanaErr(null);
 
     const f = new FormData(ev.currentTarget);
     const partnerWallet =
@@ -161,23 +204,59 @@ function DealPageInner() {
       return setError("You can’t create a deal with yourself. Choose another company.");
     }
 
-    const payload = {
-      initiator_wallet: walletAddress,
-      partner_wallet: partnerWallet,
+    // Собираем "условия" для хеша (только смысловые поля формы)
+    const terms = {
       marketplaces: String(f.get("marketplaces") || ""),
-      regions: String(f.get("regions") || ""),
       is_exclusive_mp: !!f.get("is_exclusive_mp"),
+      regions: String(f.get("regions") || ""),
       is_exclusive_reg: !!f.get("is_exclusive_reg"),
       rrc_control: String(f.get("rrc_control") || ""),
       guarantees: String(f.get("guarantees") || ""),
+    };
+
+    const payload = {
+      initiator_wallet: walletAddress,
+      partner_wallet: partnerWallet,
+      ...terms,
       status: "proposed",
     };
 
     try {
       setSaving(true);
+      // 1) Supabase
       const { data, error } = await supabase.from("deals").insert(payload).select("id").single();
       if (error) throw error;
-      setOkId(data.id);
+      const newDealId = data.id;
+      setOkId(newDealId);
+
+      // 2) Пишем memo в Solana devnet (если Phantom подключен)
+      if (!solanaAddr) {
+        setSolanaErr("Phantom not connected — on-chain memo skipped.");
+      } else {
+        try {
+          setSolanaBusy(true);
+          const { signature } = await recordDealMemo({
+            dealId: newDealId,
+            initiator: walletAddress,
+            partner: partnerWallet,
+            terms,
+          });
+          setSolanaTx(signature);
+
+          // 3) Сохраняем подпись транзакции в сделку (если колонка есть)
+          try {
+            await supabase.from("deals").update({ blockchain_tx: signature }).eq("id", newDealId);
+          } catch (e) {
+            console.warn("Deal update with blockchain_tx failed (column missing?):", e?.message);
+          }
+        } catch (chainErr) {
+          console.error("Solana memo failed:", chainErr);
+          setSolanaErr(chainErr?.message || "Solana memo failed.");
+        } finally {
+          setSolanaBusy(false);
+        }
+      }
+
       ev.target.reset();
     } catch (e) {
       setError(e?.message || "Failed to create deal");
@@ -258,13 +337,14 @@ function DealPageInner() {
 
       <h1 className="text-2xl font-bold mb-2">Create Deal</h1>
 
+      {/* EVM connect */}
       {walletAddress ? (
-        <p className="text-green-700 text-sm mb-2">✅ Wallet connected: {walletAddress}</p>
+        <p className="text-green-700 text-sm mb-2">✅ Wallet connected (EVM): {walletAddress}</p>
       ) : (
         <button
           onClick={async () => {
             try {
-              const r = await connectWallet();
+              const r = await safeConnectEvmWallet();
               if (r?.userAddress) {
                 const addr = String(r.userAddress);
                 setWalletAddress(addr);
@@ -275,7 +355,9 @@ function DealPageInner() {
                   setHasOwnProfile(true);
                 }
               }
-            } catch {}
+            } catch (e) {
+              setError(e?.message || "Failed to connect wallet");
+            }
           }}
           className="mb-2 bg-black text-white px-6 py-2 rounded-lg hover:bg-gray-800"
         >
@@ -283,8 +365,72 @@ function DealPageInner() {
         </button>
       )}
 
+      {/* Solana connect + airdrop */}
+      <div className="w-full max-w-md mb-2">
+        {solanaAddr ? (
+          <p className="text-green-700 text-xs">✅ Phantom connected (Solana): {solanaAddr}</p>
+        ) : (
+          <button
+            onClick={async () => {
+              setSolanaErr(null);
+              try {
+                const { publicKey } = await connectPhantom();
+                setSolanaAddr(publicKey || null);
+              } catch (e) {
+                setSolanaErr(e?.message || "Failed to connect Phantom");
+              }
+            }}
+            className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 text-sm mr-2"
+          >
+            🔮 Connect Phantom (Solana)
+          </button>
+        )}
+
+        <button
+          disabled={!solanaAddr}
+          onClick={async () => {
+            try {
+              const info = await ensureAirdrop(solanaAddr, 0.1); // целим 0.1 SOL минимум
+              setAirdropInfo(info);
+              setSolanaErr(null);
+            } catch (e) {
+              setSolanaErr(e?.message || "Airdrop failed");
+            }
+          }}
+          className="bg-indigo-600 text-white px-3 py-2 rounded hover:bg-indigo-700 text-sm disabled:opacity-50"
+        >
+          💧 Airdrop 0.1 SOL (devnet)
+        </button>
+
+        {airdropInfo && (
+          <p className="text-xs text-gray-700 mt-1">
+            Airdrop ok. Balance: {airdropInfo.balanceLamports} lamports
+          </p>
+        )}
+        {solanaErr && <p className="text-red-600 text-xs mt-1">{solanaErr}</p>}
+      </div>
+
+      {/* Statuses */}
       {error && <p className="text-red-600 mt-1">{error}</p>}
-      {okId && <p className="text-green-700 mt-1">✅ Deal saved. ID: <b>{okId}</b></p>}
+      {okId && (
+        <p className="text-green-700 mt-1">
+          ✅ Deal saved. ID: <b>{okId}</b>
+        </p>
+      )}
+      {solanaBusy && <p className="text-gray-700 text-xs mt-1">⛓️ Writing memo to Solana…</p>}
+      {solanaTx && (
+        <p className="text-green-700 text-xs mt-1">
+          ✅ On-chain memo:{" "}
+          <a
+            className="underline"
+            href={`https://explorer.solana.com/tx/${solanaTx}?cluster=devnet`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View in Explorer
+          </a>
+        </p>
+      )}
 
       <form onSubmit={handleSubmit} className="w-full max-w-md mt-6 bg-white p-6 rounded-xl shadow-md text-left">
         <h2 className="text-xl font-semibold mb-4">Deal form</h2>
