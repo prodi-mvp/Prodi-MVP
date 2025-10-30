@@ -3,9 +3,9 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { connectWallet } from "../../lib/wallet";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase, setProdiWalletHeader } from "../../lib/supabaseClient";
 
-/* ===== small helper ===== */
+/* ---------- helpers ---------- */
 async function fetchCompanyByWallet(wallet) {
   if (!wallet) return null;
   const { data, error } = await supabase
@@ -20,7 +20,6 @@ async function fetchCompanyByWallet(wallet) {
   return data;
 }
 
-/* ===== Debounce hook (микро) ===== */
 function useDebounced(value, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -30,7 +29,7 @@ function useDebounced(value, delay = 300) {
   return v;
 }
 
-/* ===================== INNER ===================== */
+/* ---------- inner page ---------- */
 function DealPageInner() {
   // Party A (initiator)
   const [walletAddress, setWalletAddress] = useState(null);
@@ -40,7 +39,7 @@ function DealPageInner() {
   const [selectedPartner, setSelectedPartner] = useState(null); // {company?, wallet}
   const [bCompany, setBCompany] = useState(null);
 
-  // UI state
+  // UI
   const [error, setError] = useState(null);
   const [okId, setOkId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -51,12 +50,12 @@ function DealPageInner() {
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
 
-  // read deeplink
+  // deeplink (?counterparty=&company=)
   const searchParams = useSearchParams();
   const prefCounterparty = searchParams.get("counterparty");
   const prefCompany = searchParams.get("company");
 
-  /* 1) Подключаем кошелёк и подтягиваем название своей компании (если есть) */
+  // 1) connect wallet + fetch my company
   useEffect(() => {
     (async () => {
       try {
@@ -64,21 +63,24 @@ function DealPageInner() {
         if (res?.userAddress) {
           const addr = String(res.userAddress);
           setWalletAddress(addr);
+          setProdiWalletHeader?.(addr); // RLS header
           const found = await fetchCompanyByWallet(addr);
           if (found?.company) setACompany(found.company);
         }
-      } catch {/* юзер может подключиться вручную */}
+      } catch {
+        /* user can connect later */
+      }
     })();
   }, []);
 
-  /* 2) Применяем deeplink. Если это твой же кошелёк — предупреждение. */
+  // 2) apply deeplink (block self-deal)
   useEffect(() => {
     (async () => {
       if (!prefCounterparty) return;
       if (walletAddress && prefCounterparty.toLowerCase() === walletAddress.toLowerCase()) {
         setSelectedPartner(null);
         setBCompany(null);
-        setError("You cannot create a deal with your own profile. Please choose another company.");
+        setError("You cannot create a deal with your own profile. Choose another company.");
         return;
       }
       const preset = { wallet: String(prefCounterparty), company: prefCompany || null };
@@ -93,11 +95,14 @@ function DealPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefCounterparty, prefCompany, walletAddress]);
 
-  /* 3) Когда выбираем партнёра из поиска — подставляем его название */
+  // 3) when partner changes — ensure company name filled
   useEffect(() => {
     (async () => {
       if (!selectedPartner) return;
-      const w = selectedPartner.wallet || selectedPartner.wallet_address || selectedPartner.address;
+      const w =
+        selectedPartner.wallet ||
+        selectedPartner.wallet_address ||
+        selectedPartner.address;
       const c = selectedPartner.company || null;
       setBCompany(c || null);
       if (!c && w) {
@@ -107,7 +112,7 @@ function DealPageInner() {
     })();
   }, [selectedPartner]);
 
-  /* 4) Поиск в Supabase по публичным профилям, исключая свой кошелёк */
+  // 4) public search (exclude myself)
   useEffect(() => {
     (async () => {
       setError(null);
@@ -150,7 +155,7 @@ function DealPageInner() {
     return `Deal: ${a} ↔ ${b}`;
   }, [aCompany, bCompany, walletAddress, selectedPartner]);
 
-  /* ===== Submit ===== */
+  // submit
   const handleSubmit = async (ev) => {
     ev.preventDefault();
     setError(null);
@@ -167,21 +172,21 @@ function DealPageInner() {
 
     if (!walletAddress) return setError("Connect your wallet first.");
     if (!partnerWallet) return setError("Select a counterparty or enter wallet manually.");
-    if (walletAddress && partnerWallet && walletAddress.toLowerCase() === partnerWallet.toLowerCase()) {
+    if (walletAddress.toLowerCase() === partnerWallet.toLowerCase()) {
       return setError("You cannot create a deal with yourself. Choose another company.");
     }
 
-const payload = {
-  initiator_wallet: walletAddress,
-  partner_wallet: partnerWallet,
-  marketplaces: String(f.get("marketplaces") || ""),
-  regions: String(f.get("regions") || ""),
-  is_exclusive_mp: !!f.get("is_exclusive_mp"),
-  is_exclusive_reg: !!f.get("is_exclusive_reg"),
-  rrc_control: String(f.get("rrc_control") || ""),
-  guarantees: String(f.get("guarantees") || ""),
-+ status: "proposed"
-     };
+    const payload = {
+      initiator_wallet: walletAddress,
+      partner_wallet: partnerWallet,
+      marketplaces: String(f.get("marketplaces") || ""),
+      regions: String(f.get("regions") || ""),
+      is_exclusive_mp: !!f.get("is_exclusive_mp"),
+      is_exclusive_reg: !!f.get("is_exclusive_reg"),
+      rrc_control: String(f.get("rrc_control") || ""),
+      guarantees: String(f.get("guarantees") || ""),
+      status: "proposed",
+    };
 
     try {
       setSaving(true);
@@ -205,10 +210,10 @@ const payload = {
     }
   };
 
-  /* ===== UI ===== */
+  /* ---------- UI ---------- */
   return (
     <div className="flex flex-col items-center justify-start min-h-screen bg-gray-100 text-center p-4">
-      {/* Инлайн поиск контрагента */}
+      {/* inline counterparty search */}
       <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
         <label className="block text-sm font-medium mb-2">Find a company to make a deal with</label>
         <input
@@ -245,7 +250,7 @@ const payload = {
         )}
       </div>
 
-      {/* Участники */}
+      {/* parties */}
       <div className="w-full max-w-md mb-4 text-left bg-white p-4 rounded-xl shadow">
         <div className="font-semibold mb-2">{headerTitle}</div>
         <div className="text-sm">
@@ -279,9 +284,13 @@ const payload = {
           onClick={async () => {
             try {
               const r = await connectWallet();
-              if (r?.userAddress) setWalletAddress(String(r.userAddress));
-              const found = await fetchCompanyByWallet(String(r?.userAddress || ""));
-              if (found?.company) setACompany(found.company);
+              if (r?.userAddress) {
+                const addr = String(r.userAddress);
+                setWalletAddress(addr);
+                setProdiWalletHeader?.(addr);
+                const found = await fetchCompanyByWallet(addr);
+                if (found?.company) setACompany(found.company);
+              }
             } catch {}
           }}
           className="mb-2 bg-black text-white px-6 py-2 rounded-lg hover:bg-gray-800"
@@ -293,7 +302,7 @@ const payload = {
       {error && <p className="text-red-600 mt-1">{error}</p>}
       {okId && <p className="text-green-700 mt-1">✅ Deal saved. ID: <b>{okId}</b></p>}
 
-      {/* Форма сделки */}
+      {/* form */}
       <form onSubmit={handleSubmit} className="w-full max-w-md mt-6 bg-white p-6 rounded-xl shadow-md text-left">
         <h2 className="text-xl font-semibold mb-4">Deal form</h2>
 
@@ -319,7 +328,7 @@ const payload = {
         <label className="block mb-2">Manufacturer guarantees:</label>
         <textarea name="guarantees" className="w-full p-2 border rounded mb-4" />
 
-        {/* Ручной фолбэк — останется, пока не у всех профилей есть wallet */}
+        {/* manual fallback while not all profiles have wallet */}
         <div className="mb-4">
           <label className="block mb-2">Counterparty wallet (manual fallback):</label>
           <input
@@ -342,7 +351,7 @@ const payload = {
   );
 }
 
-/* ===== Export with Suspense (чтобы SSR не ругался на useSearchParams) ===== */
+/* ---------- export with Suspense (for useSearchParams on Vercel) ---------- */
 export default function DealPage() {
   return (
     <Suspense fallback={<div className="p-6 text-center text-gray-600">Loading…</div>}>
