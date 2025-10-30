@@ -95,13 +95,12 @@ function DealPageInner() {
 
   // Если Phantom уже доверен — подтянем
   useEffect(() => {
-    const prov = typeof window !== "undefined" ? window.solana : null;
-    if (prov?.isPhantom) {
-      useEffect(() => {}, []);.then(
-        (r) => setSolanaAddr(r?.publicKey?.toBase58() || null),
-        () => {}
-      );
-    }
+   const prov = typeof window === "undefined" ? null : window.solana;
+  if (prov?.isPhantom) {
+    prov.connect({ onlyIfTrusted: true })
+      .then((r) => setSolanaAddr(r?.publicKey?.toBase58() || null))
+      .catch(() => {});
+  }
   }, []);
 
   useEffect(() => {
